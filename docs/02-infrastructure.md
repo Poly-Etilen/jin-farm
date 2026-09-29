@@ -12,6 +12,7 @@
 | 이미지 저장소 | **GHCR** (GitHub Container Registry) | GitHub 계정으로 바로 사용, 버전별 이미지 보관 → 롤백 가능 |
 | 배포 방식 | 서버에 **self-hosted runner** 설치 | 공유기 포트포워딩 없이 서버가 GitHub에 먼저 접속해 배포 작업을 받아옴 |
 | 도메인 | 없음 → **추후 구매** | 구매 시 Cloudflare Tunnel로 HTTPS 공개 (4장) |
+| 코드 품질 | **SonarQube Cloud (Free 플랜)** + JaCoCo 커버리지 | Private 저장소 5만 줄까지 무료, PR 분석 지원, 서버 자원 사용 없음 |
 
 ## 2. 전체 구성
 
@@ -41,13 +42,27 @@
 
 | 워크플로 | 트리거 | 하는 일 |
 |---|---|---|
-| [`ci.yml`](../.github/workflows/ci.yml) | main으로 가는 PR | Java 21로 `mvnw verify` (빌드 + 테스트) |
+| [`ci.yml`](../.github/workflows/ci.yml) | main으로 가는 PR, main에 push | Java 21로 빌드 + 테스트 + JaCoCo 커버리지 + SonarQube Cloud 분석. **PR에서는 Quality Gate 실패 시 CI 실패** |
 | [`cd.yml`](../.github/workflows/cd.yml) | main에 push, 수동 실행 | ① 빌드·테스트 ② 이미지를 `ghcr.io/<owner>/jinfarm:<커밋SHA>`, `:latest`로 push ③ 서버 runner가 새 이미지로 교체 ④ `/actuator/health` 확인, 실패 시 로그 출력 후 실패 처리 |
 
 - 이미지는 **amd64와 arm64를 둘 다** 만든다. 서버가 미니PC든 라즈베리파이든 같은 파이프라인을 쓴다.
   jar는 CI에서 먼저 빌드하고 Dockerfile은 jar만 복사하므로 arm64 빌드도 빠르다.
 - 배포는 한 번에 하나만 실행된다 (`concurrency`).
 - `environment: production`을 쓰므로, GitHub 설정에서 **배포 전 승인**을 켤 수 있다.
+
+### SonarQube Cloud
+
+| 항목 | 값 |
+|---|---|
+| Organization | `poly-etilen` |
+| Project key | `Poly-Etilen_jin-farm` |
+| 설정 위치 | `pom.xml`의 `sonar.*` 속성 |
+| 인증 | GitHub Secrets `SONAR_TOKEN` |
+| 분석 방식 | GitHub Actions (CI-based). SonarQube Cloud의 **Automatic Analysis는 꺼야 함** (켜져 있으면 분석이 충돌해 실패) |
+
+- main 분석 결과가 "새 코드" 판단의 기준이 되므로, main push 때도 분석한다 (Quality Gate는 기다리지 않음).
+- main 보호 규칙의 필수 체크에 CI를 넣으면 Quality Gate를 통과하지 못한 PR은 병합할 수 없다.
+- 로컬에서 커버리지만 보려면 `mvnw verify` 후 `target/site/jacoco/index.html`을 연다.
 
 ### 관련 파일
 
@@ -140,6 +155,7 @@
 | 항목 | 비용 |
 |---|---|
 | GitHub (Private 저장소, Actions, GHCR) | 무료 한도 내 (Actions 월 2,000분, 패키지 저장 500MB) |
+| SonarQube Cloud | Free 플랜 (Private 5만 줄까지). **Team 플랜 체험 신청하지 않도록 주의** |
 | 서버 전기료 | 미니PC 기준 월 1~2천원 수준 |
 | 도메인 | 추후 연 1~2만원 |
 | Cloudflare Tunnel, Tailscale | 무료 |
