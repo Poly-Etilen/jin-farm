@@ -116,7 +116,8 @@
 
 ## 5. 서버 준비 절차
 
-> 서버 하드웨어가 정해지면 진행한다. 아래는 **Ubuntu Server 24.04 LTS** 기준.
+> 서버 위치는 **집**으로 결정. 하드웨어 구매 전에는 **개발 PC의 WSL Ubuntu를 연습 서버**로 써서 배포 파이프라인을 먼저 검증한다 (5.4).
+> 설치 절차는 Ubuntu 기준이며, 실제 서버와 연습 서버가 같은 스크립트를 쓴다.
 
 ### 5.1 권장 사양
 
@@ -128,31 +129,30 @@
 
 ### 5.2 설치 순서
 
-1. **Ubuntu Server 설치**, 자동 보안 업데이트(`unattended-upgrades`) 켜기
-2. **Docker 설치** (공식 문서의 `get.docker.com` 스크립트 또는 apt 저장소)
-3. **배포 폴더 준비**
+1. **Ubuntu 설치** (실제 서버: Ubuntu Server LTS + 자동 보안 업데이트 `unattended-upgrades`)
+2. **초기 설정 스크립트 실행** — [`deploy/server-setup.sh`](../deploy/server-setup.sh)
    ```bash
-   sudo mkdir -p /opt/jinfarm/backups
-   sudo chown -R $USER /opt/jinfarm
-   cp deploy/.env.example /opt/jinfarm/.env   # 값 채우기, DB_PASSWORD는 긴 무작위 문자열
-   chmod 600 /opt/jinfarm/.env
-   cp deploy/backup.sh /opt/jinfarm/ && chmod +x /opt/jinfarm/backup.sh
+   sudo bash deploy/server-setup.sh
    ```
-4. **runner 전용 사용자** 만들고 docker 그룹에 추가
+   - Docker + Compose 설치 (Ubuntu 패키지 `docker.io`, `docker-compose-v2`)
+   - runner 전용 사용자 `gh-runner` 생성, docker 그룹 추가
+   - `/opt/jinfarm` 준비: `backup.sh` 복사, `.env` 생성(**DB 비밀번호 무작위 생성**), 권한 600
+   - 백업 cron 등록 (매일 03:30, `gh-runner`)
+   - 여러 번 실행해도 안전 (기존 `.env`는 유지)
+3. **self-hosted runner 설치**: GitHub 저장소 → Settings → Actions → Runners → **New self-hosted runner** (Linux, x64)
    ```bash
-   sudo useradd -m -s /bin/bash gh-runner
-   sudo usermod -aG docker gh-runner
+   sudo -iu gh-runner
+   mkdir actions-runner && cd actions-runner
+   # 화면의 Download 명령 실행 후 Configure 명령 실행
+   #   - runner group: Default / name: 원하는 이름
+   #   - additional labels: jinfarm-prod   ← 반드시 입력
+   exit
+   cd /home/gh-runner/actions-runner && sudo ./svc.sh install gh-runner && sudo ./svc.sh start
    ```
-5. **self-hosted runner 설치**: GitHub 저장소 → Settings → Actions → Runners → New self-hosted runner
-   - 안내된 명령을 `gh-runner` 사용자로 실행
-   - `config.sh` 실행 시 라벨에 **`jinfarm-prod`** 추가
-   - `sudo ./svc.sh install gh-runner && sudo ./svc.sh start` 로 서비스 등록 (재부팅 시 자동 실행)
-6. **배포 켜기**: GitHub 저장소 변수 `DEPLOY_ENABLED` = `true` 등록 (3장 참고)
-7. **백업 cron 등록** (`crontab -e`)
-   ```
-   30 3 * * * /opt/jinfarm/backup.sh >> /opt/jinfarm/backup.log 2>&1
-   ```
-8. **정전 대비**: BIOS에서 "AC 전원 복구 시 자동 켜짐" 설정. 가능하면 소형 UPS
+   → 저장소 Runners 목록에 **Idle**(초록)로 보이면 성공
+4. **배포 켜기**: GitHub 저장소 변수 `DEPLOY_ENABLED` = `true` 등록 (3장 참고) → Actions에서 CD **Re-run** 또는 main에 push
+5. **확인**: `curl http://localhost:8080/actuator/health` → `{"status":"UP",...}`
+6. **정전 대비** (실제 서버): BIOS에서 "AC 전원 복구 시 자동 켜짐" 설정. 가능하면 소형 UPS
 
 ### 5.3 GitHub 저장소 설정
 
@@ -162,6 +162,18 @@
 | Branch protection (main) | PR 필수, CI 통과 필수 | main = 운영 배포이므로 |
 | Environments → production | (선택) Required reviewers | 배포 전 수동 승인 |
 | GHCR 패키지 | 첫 배포 후 저장소와 연결 확인 | runner가 `GITHUB_TOKEN`으로 pull |
+
+### 5.4 연습 서버 (WSL Ubuntu)
+
+실제 서버 구매 전, 개발 PC의 WSL Ubuntu(26.04, systemd 사용)로 5.2 절차를 그대로 진행한다.
+
+| 항목 | 내용 |
+|---|---|
+| 스크립트 실행 | WSL 터미널에서 `sudo bash /mnt/c/Users/wlsdu/OneDrive/Desktop/mushroom/jinfarm/deploy/server-setup.sh` |
+| Docker | Ubuntu 안에 Docker를 따로 설치한다 (Docker Desktop과 별개). 로컬 SonarQube(Docker Desktop, :9000)와 포트가 겹치지 않는다 |
+| 접속 | Windows 브라우저에서 `http://localhost:8080` (WSL 포트 자동 전달) |
+| 주의 | WSL은 터미널을 모두 닫으면 잠시 후 꺼질 수 있다. 배포 연습 중에는 WSL 터미널을 하나 열어 둔다 |
+| 정리 | 실제 서버로 옮길 때 GitHub Runners 목록에서 연습 runner를 **Remove** 한다 (같은 라벨의 runner가 둘이면 아무 쪽에서나 배포가 실행됨) |
 
 ## 6. 운영
 
@@ -190,7 +202,8 @@
 | # | 항목 | 상태 |
 |---|---|---|
 | I1 | 서버 하드웨어 (미니PC / 라즈베리파이 / 남는 PC) | 미정 |
-| I2 | 서버 위치 (집 / 농장 건물) | 미정 |
+| I2 | 서버 위치 (집 / 농장 건물) | ✅ 집 |
+| I2-1 | 연습 서버 (WSL Ubuntu)로 배포 파이프라인 검증 | 진행 중 |
 | I3 | GitHub 저장소 생성 (Private) 및 첫 push | 미정 |
 | I4 | 도메인 구매 + Cloudflare Tunnel | 카카오 로그인 개발 시점 |
 | I5 | DB 스키마 관리 도구(Flyway) 도입 | 첫 엔티티 작성 시 |
