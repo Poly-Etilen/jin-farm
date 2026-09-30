@@ -59,11 +59,12 @@ services:
       retries: 5
     logging: *logging
 
-  # 캐시 · 장치 최신 상태 · 중복 방지 (외부 포트 노출 없음)
+  # 로그인 토큰 · 캐시 · 장치 최신 상태 (외부 포트 노출 없음)
+  # 토큰을 저장하므로 메모리가 차도 키를 지우지 않는다(noeviction). 캐시 키에는 반드시 TTL
   redis:
     image: redis:8-alpine
     restart: unless-stopped
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}", "--appendonly", "yes"]
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
     environment:
       REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     volumes:

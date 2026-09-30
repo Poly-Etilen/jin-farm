@@ -49,7 +49,7 @@
 |---|---|---|---|---|
 | `app` | GHCR 이미지 | 웹·API·알림·시뮬레이터 | `8080` | (웹 로그인) |
 | `db` | `postgres:17` | 사용자·농장·작물·재배·알림 등 업무 데이터 | 없음 | `DB_PASSWORD` |
-| `redis` | `redis:8-alpine` | 장치 최신 상태·배터리 캐시, 대시보드 캐시, 중복 처리 방지 | 없음 | `REDIS_PASSWORD` (AOF 영속화) |
+| `redis` | `redis:8-alpine` | **로그인 토큰**(JWT Refresh, 카카오 토큰 — [05-auth.md](05-auth.md)), 장치 최신 상태, 대시보드 캐시 | 없음 | `REDIS_PASSWORD` (AOF 영속화, `noeviction`) |
 | `influxdb` | `influxdb:2.7` | 센서 측정값 (버킷 `sensor`, **보관 365일**) | `127.0.0.1:8086` (서버 안에서만, 관리 화면) | `INFLUX_TOKEN` (관리자 토큰) |
 | `mqtt` | `eclipse-mosquitto:2` | 장치 ↔ 서버 메시지 | `1883` | 익명 금지, 서버 계정 `MQTT_USERNAME`/`MQTT_PASSWORD` |
 
@@ -228,6 +228,7 @@
 | I3 | GitHub 저장소 생성 (Private) 및 첫 push | ✅ push 완료 (Private 여부 확인 필요) |
 | I4 | 도메인 구매 + Cloudflare Tunnel | 카카오 로그인 개발 시점 |
 | I5 | DB 스키마 관리 도구(Flyway) 도입 | 첫 엔티티 작성 시 |
-| I6 | 백업 외부 보관 + InfluxDB 백업 추가 | 운영 시작 전 |
+| I6 | 백업 외부 보관 + InfluxDB·**Redis**(토큰) 백업 추가 | 운영 시작 전 |
 | I7 | 앱 ↔ Redis · InfluxDB · MQTT 연동 (의존성, 설정, 상태 페이지 표시) | 다음 작업 |
 | I8 | MQTT 장치별 계정·권한(ACL), TLS(8883) | 장치 인증(FRM-05) 구현 시 |
+| I9 | AI 챗봇: `GEMINI_API_KEY`를 서버 `.env`에 추가, Google Cloud 결제 연결(유료 등급) + 월 예산 알림 설정 | AI 챗봇 구현 시 ([06-ai-chatbot.md](06-ai-chatbot.md)) |
