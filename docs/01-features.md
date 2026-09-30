@@ -263,7 +263,7 @@
 
 - [`02-infrastructure.md`](02-infrastructure.md) — 서버 인프라, CI/CD
 - `03-architecture.md` — 시스템 구성, 기술 스택, 장치 통신 방식, 시뮬레이터 구조
-- `04-domain-model.md` — 엔티티/ERD (멀티 농장, 일년생/다년생 재배 포함)
+- [`04-domain-model.md`](04-domain-model.md) — 엔티티/ERD (멀티 농장, 일년생/다년생 재배 포함)
 - `05-api-spec.md` — REST API 및 장치 통신 메시지 규격
 - `06-alert-rules.md` — 알림 조건·중복 억제 규칙 상세
 - `07-irrigation-logic.md` — 자동 관수 알고리즘 상세 (2단계)

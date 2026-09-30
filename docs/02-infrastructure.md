@@ -8,7 +8,9 @@
 |---|---|---|
 | 서버 위치 | **자체 서버** (집 또는 농장 건물) | 월 예산 무료~1만원 |
 | 저장소 · CI/CD | **GitHub + GitHub Actions** | 무료, 자료 많음 |
-| 실행 방식 | **Docker Compose** (앱 + PostgreSQL) | 서버 1대에서 단순하게 운영, 나중에 클라우드로 옮기기 쉬움 |
+| 실행 방식 | **Docker Compose** (앱 + PostgreSQL + Redis + InfluxDB + MQTT) | 서버 1대에서 단순하게 운영, 나중에 클라우드로 옮기기 쉬움 |
+| 데이터 저장소 | PostgreSQL 17 (업무 데이터), **InfluxDB 2.7** (센서 측정값), **Redis 8** (캐시·최신 상태) | 측정값은 쌓이는 양과 조회 방식이 달라 시계열 DB로 분리 (2.1) |
+| 장치 통신 | **MQTT (Eclipse Mosquitto 2)** | 저전력 장치에 적합한 가벼운 발행/구독 프로토콜, 브로커가 가벼움 |
 | 이미지 저장소 | **GHCR** (GitHub Container Registry) | GitHub 계정으로 바로 사용, 버전별 이미지 보관 → 롤백 가능 |
 | 배포 방식 | 서버에 **self-hosted runner** 설치 | 공유기 포트포워딩 없이 서버가 GitHub에 먼저 접속해 배포 작업을 받아옴 |
 | 도메인 | 없음 → **추후 구매** | 구매 시 Cloudflare Tunnel로 HTTPS 공개 (4장) |
@@ -32,12 +34,31 @@
  ┌─────────────── 자체 서버 (집/농장 건물) ───────────────┐
  │  self-hosted runner ── docker compose pull / up        │
  │                                                        │
- │  [app: Spring Boot :8080] ── [db: PostgreSQL 17]        │
- │                                  └─ volume: db-data    │
+ │  [app: Spring Boot :8080] ─┬─ [db: PostgreSQL 17]       │
+ │                            ├─ [redis: Redis 8]          │
+ │                            ├─ [influxdb: InfluxDB 2.7]  │
+ │                            └─ [mqtt: Mosquitto 2 :1883] ◀── 장치·게이트웨이
  │  cron: backup.sh (매일 PostgreSQL 백업)                  │
  │  (도메인 구매 후) cloudflared ── HTTPS ── 인터넷          │
  └────────────────────────────────────────────────────────┘
 ```
+
+### 2.1 컨테이너 구성
+
+| 서비스 | 이미지 | 용도 | 외부 포트 | 인증 |
+|---|---|---|---|---|
+| `app` | GHCR 이미지 | 웹·API·알림·시뮬레이터 | `8080` | (웹 로그인) |
+| `db` | `postgres:17` | 사용자·농장·작물·재배·알림 등 업무 데이터 | 없음 | `DB_PASSWORD` |
+| `redis` | `redis:8-alpine` | 장치 최신 상태·배터리 캐시, 대시보드 캐시, 중복 처리 방지 | 없음 | `REDIS_PASSWORD` (AOF 영속화) |
+| `influxdb` | `influxdb:2.7` | 센서 측정값 (버킷 `sensor`, **보관 365일**) | `127.0.0.1:8086` (서버 안에서만, 관리 화면) | `INFLUX_TOKEN` (관리자 토큰) |
+| `mqtt` | `eclipse-mosquitto:2` | 장치 ↔ 서버 메시지 | `1883` | 익명 금지, 서버 계정 `MQTT_USERNAME`/`MQTT_PASSWORD` |
+
+- 앱은 네 저장소가 모두 **healthy**가 된 뒤에 시작한다.
+- 모든 비밀번호·토큰은 서버의 `/opt/jinfarm/.env`에만 있고, `server-setup.sh`가 무작위로 생성한다.
+- **InfluxDB 초기화는 첫 실행 때 한 번만** 된다. 이후 `.env`의 `INFLUX_TOKEN`을 바꿔도 InfluxDB의 토큰은 바뀌지 않으므로, 토큰을 바꾸려면 InfluxDB 관리 화면에서 새 토큰을 만든 뒤 `.env`에 반영한다.
+- **MQTT 계정**: 컨테이너 시작 시 [`deploy/mosquitto/entrypoint.sh`](../deploy/mosquitto/entrypoint.sh)가 `.env` 값으로 비밀번호 파일을 새로 만든다. 장치별 계정·권한(ACL)은 장치 인증(FRM-05) 구현 시 추가한다.
+- **MQTT 1883은 암호화되지 않은 포트**다. 서버를 인터넷에 공개하거나 농장 게이트웨이가 인터넷을 거쳐 접속하게 되면 TLS(8883)를 적용한 뒤 연다.
+- 백업: `backup.sh`는 현재 PostgreSQL만 백업한다. 측정값 백업(`influx backup`)은 운영 시작 전 추가한다 (8장 I6).
 
 ## 3. 파이프라인
 
@@ -203,8 +224,10 @@
 |---|---|---|
 | I1 | 서버 하드웨어 (미니PC / 라즈베리파이 / 남는 PC) | 미정 |
 | I2 | 서버 위치 (집 / 농장 건물) | ✅ 집 |
-| I2-1 | 연습 서버 (WSL Ubuntu)로 배포 파이프라인 검증 | 진행 중 |
-| I3 | GitHub 저장소 생성 (Private) 및 첫 push | 미정 |
+| I2-1 | 연습 서버 (WSL Ubuntu)로 배포 파이프라인 검증 | ✅ 자동 배포 동작 확인 |
+| I3 | GitHub 저장소 생성 (Private) 및 첫 push | ✅ push 완료 (Private 여부 확인 필요) |
 | I4 | 도메인 구매 + Cloudflare Tunnel | 카카오 로그인 개발 시점 |
 | I5 | DB 스키마 관리 도구(Flyway) 도입 | 첫 엔티티 작성 시 |
-| I6 | 백업 외부 보관 | 운영 시작 전 |
+| I6 | 백업 외부 보관 + InfluxDB 백업 추가 | 운영 시작 전 |
+| I7 | 앱 ↔ Redis · InfluxDB · MQTT 연동 (의존성, 설정, 상태 페이지 표시) | 다음 작업 |
+| I8 | MQTT 장치별 계정·권한(ACL), TLS(8883) | 장치 인증(FRM-05) 구현 시 |

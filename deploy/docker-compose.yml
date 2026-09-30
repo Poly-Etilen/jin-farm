@@ -1,5 +1,11 @@
-# 운영 서버 실행 구성: 앱 + PostgreSQL
+# 운영 서버 실행 구성: 앱 + PostgreSQL + Redis + InfluxDB + MQTT(Mosquitto)
 # 실행: docker compose -p jinfarm -f deploy/docker-compose.yml --env-file /opt/jinfarm/.env up -d
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   app:
     image: ${APP_IMAGE:?APP_IMAGE is required}:${APP_TAG:-latest}
@@ -7,16 +13,31 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      influxdb:
+        condition: service_healthy
+      mqtt:
+        condition: service_healthy
     environment:
       APP_COMMIT: ${APP_TAG:-latest}
       DB_HOST: db
       DB_NAME: ${DB_NAME:-jinfarm}
       DB_USER: ${DB_USER:?DB_USER is required}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      INFLUX_URL: http://influxdb:8086
+      INFLUX_ORG: ${INFLUX_ORG:-jinfarm}
+      INFLUX_BUCKET: ${INFLUX_BUCKET:-sensor}
+      INFLUX_TOKEN: ${INFLUX_TOKEN:?INFLUX_TOKEN is required}
+      MQTT_URL: tcp://mqtt:1883
+      MQTT_USERNAME: ${MQTT_USERNAME:-jinfarm-server}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD is required}
     ports:
       - "${APP_PORT:-8080}:8080"
     logging:
-      driver: json-file
+      <<: *logging
       options:
         max-size: "10m"
         max-file: "5"
@@ -36,11 +57,73 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *logging
+
+  # 캐시 · 장치 최신 상태 · 중복 방지 (외부 포트 노출 없음)
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}", "--appendonly", "yes"]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *logging
+
+  # 센서 측정값 (시계열). 최초 실행 시 조직·버킷·관리자 토큰을 자동 생성
+  influxdb:
+    image: influxdb:2.7
+    restart: unless-stopped
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUX_USERNAME:-admin}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_PASSWORD:?INFLUX_PASSWORD is required}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUX_ORG:-jinfarm}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUX_BUCKET:-sensor}
+      DOCKER_INFLUXDB_INIT_RETENTION: ${INFLUX_RETENTION:-365d}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN:?INFLUX_TOKEN is required}
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+      - influxdb-config:/etc/influxdb2
+    ports:
+      # 관리 화면은 서버 안에서만 (http://localhost:8086)
+      - "127.0.0.1:${INFLUX_PORT:-8086}:8086"
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *logging
+
+  # 장치 ↔ 서버 메시지 브로커. 익명 접속 금지, 서버 계정은 시작 시 .env 값으로 생성
+  mqtt:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    environment:
+      MQTT_USERNAME: ${MQTT_USERNAME:-jinfarm-server}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD is required}
+    entrypoint: ["/bin/sh", "/mosquitto/config/entrypoint.sh"]
+    volumes:
+      - ./mosquitto:/mosquitto/config:ro
+      - mqtt-data:/mosquitto/data
+    ports:
+      # 현장 장치 연결용. 인터넷 공개 시에는 TLS(8883) 적용 후 연다
+      - "${MQTT_PORT:-1883}:1883"
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h localhost -u \"$$MQTT_USERNAME\" -P \"$$MQTT_PASSWORD\" -t '$$SYS/broker/uptime' -C 1 -W 3"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *logging
 
 volumes:
   db-data:
+  redis-data:
+  influxdb-data:
+  influxdb-config:
+  mqtt-data:

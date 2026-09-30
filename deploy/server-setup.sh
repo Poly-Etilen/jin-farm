@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # JinFarm 서버 초기 설정 (Ubuntu). 여러 번 실행해도 안전하다.
 #   sudo bash deploy/server-setup.sh
-# 하는 일: Docker 설치, runner 전용 사용자(gh-runner), /opt/jinfarm 준비(.env 생성), 백업 cron 등록
+# 하는 일: Docker 설치, runner 전용 사용자(gh-runner), /opt/jinfarm 준비(.env 생성·누락 항목 보충), 백업 cron 등록
+# 새 인프라 항목이 추가되면 배포 전에 다시 실행해 .env를 보충한다.
 set -euo pipefail
 
 RUNNER_USER=gh-runner
@@ -29,12 +30,20 @@ echo "==> 3. 배포 폴더: $APP_DIR"
 mkdir -p "$APP_DIR/backups"
 install -m 755 "$SCRIPT_DIR/backup.sh" "$APP_DIR/backup.sh"
 
-if [[ ! -f "$APP_DIR/.env" ]]; then
-  sed "s/^DB_PASSWORD=.*/DB_PASSWORD=$(openssl rand -hex 24)/" "$SCRIPT_DIR/.env.example" > "$APP_DIR/.env"
-  echo "    .env 생성 (DB 비밀번호 무작위 생성)"
-else
-  echo "    .env 이미 있음 — 유지"
-fi
+# .env.example에 있고 .env에 없는 항목만 추가한다 (기존 값은 절대 덮어쓰지 않음)
+# *_PASSWORD / *_TOKEN 항목은 무작위 값으로 채운다
+touch "$APP_DIR/.env"
+while IFS= read -r line; do
+  [[ "$line" =~ ^([A-Z_]+)=(.*)$ ]] || continue
+  key="${BASH_REMATCH[1]}"
+  value="${BASH_REMATCH[2]}"
+  grep -q "^${key}=" "$APP_DIR/.env" && continue
+  if [[ "$key" == *_PASSWORD || "$key" == *_TOKEN ]]; then
+    value="$(openssl rand -hex 24)"
+  fi
+  echo "${key}=${value}" >> "$APP_DIR/.env"
+  echo "    .env 항목 추가: $key"
+done < "$SCRIPT_DIR/.env.example"
 chown -R "$RUNNER_USER:$RUNNER_USER" "$APP_DIR"
 chmod 600 "$APP_DIR/.env"
 
