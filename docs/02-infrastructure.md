@@ -94,7 +94,7 @@
 | [`deploy/docker-compose.yml`](../deploy/docker-compose.yml) | 앱 + PostgreSQL, 자동 재시작, 로그 크기 제한 |
 | [`deploy/.env.example`](../deploy/.env.example) | 서버 환경변수 예시 (실제 값은 서버 `/opt/jinfarm/.env`에만) |
 | [`deploy/backup.sh`](../deploy/backup.sh) | PostgreSQL 일일 백업, 14일 보관 |
-| [`application-prod.properties`](../src/main/resources/application-prod.properties) | 운영 DB 접속 정보(환경변수), graceful shutdown |
+| [`application.yml`](../src/main/resources/application.yml), [`application-prod.yml`](../src/main/resources/application-prod.yml) | 로컬 기본 설정(H2) / 운영 DB 접속 정보(환경변수), graceful shutdown |
 | [`SecurityConfig.java`](../src/main/java/org/farm/jinfarm/config/SecurityConfig.java) | 헬스체크 공개 (카카오 로그인 도입 전 임시 설정) |
 
 ### 로컬 검증 결과 (2026-09-29)

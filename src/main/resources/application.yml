@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: jinfarm
+
+  # 로컬 개발 기본값: 인메모리 H2 (운영은 application-prod.yml)
+  datasource:
+    url: jdbc:h2:mem:jinfarm;MODE=PostgreSQL
+  h2:
+    console:
+      enabled: true
+  jpa:
+    open-in-view: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true

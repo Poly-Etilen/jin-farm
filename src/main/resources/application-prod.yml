@@ -1,0 +1,18 @@
+# 운영 프로필: 접속 정보는 환경변수로 주입 (deploy/.env 참고)
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:db}:${DB_PORT:5432}/${DB_NAME:jinfarm}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+  h2:
+    console:
+      enabled: false
+  jpa:
+    # TODO: 스키마 관리 도구(Flyway) 도입 후 validate로 변경
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+
+server:
+  forward-headers-strategy: framework
+  shutdown: graceful
