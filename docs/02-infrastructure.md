@@ -48,6 +48,8 @@
 
 - 이미지는 **amd64와 arm64를 둘 다** 만든다. 서버가 미니PC든 라즈베리파이든 같은 파이프라인을 쓴다.
   jar는 CI에서 먼저 빌드하고 Dockerfile은 jar만 복사하므로 arm64 빌드도 빠르다.
+- 배포(③④)는 저장소 변수 **`DEPLOY_ENABLED`가 `true`일 때만** 실행된다. 서버와 runner가 준비되기 전에는 건너뛴다(skipped).
+  켜는 곳: 저장소 Settings → Secrets and variables → Actions → **Variables** 탭 → `DEPLOY_ENABLED` = `true`
 - 배포는 한 번에 하나만 실행된다 (`concurrency`).
 - `environment: production`을 쓰므로, GitHub 설정에서 **배포 전 승인**을 켤 수 있다.
 
@@ -145,11 +147,12 @@
    - 안내된 명령을 `gh-runner` 사용자로 실행
    - `config.sh` 실행 시 라벨에 **`jinfarm-prod`** 추가
    - `sudo ./svc.sh install gh-runner && sudo ./svc.sh start` 로 서비스 등록 (재부팅 시 자동 실행)
-6. **백업 cron 등록** (`crontab -e`)
+6. **배포 켜기**: GitHub 저장소 변수 `DEPLOY_ENABLED` = `true` 등록 (3장 참고)
+7. **백업 cron 등록** (`crontab -e`)
    ```
    30 3 * * * /opt/jinfarm/backup.sh >> /opt/jinfarm/backup.log 2>&1
    ```
-7. **정전 대비**: BIOS에서 "AC 전원 복구 시 자동 켜짐" 설정. 가능하면 소형 UPS
+8. **정전 대비**: BIOS에서 "AC 전원 복구 시 자동 켜짐" 설정. 가능하면 소형 UPS
 
 ### 5.3 GitHub 저장소 설정
 

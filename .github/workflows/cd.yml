@@ -48,6 +48,8 @@ jobs:
 
   deploy:
     needs: build
+    # 서버 준비 전에는 건너뜀. 저장소 변수 DEPLOY_ENABLED=true 로 켠다
+    if: vars.DEPLOY_ENABLED == 'true'
     # 서버에 설치한 self-hosted runner에서 실행 (라벨: jinfarm-prod)
     runs-on: [self-hosted, jinfarm-prod]
     environment: production
