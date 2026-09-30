@@ -8,6 +8,7 @@ services:
       db:
         condition: service_healthy
     environment:
+      APP_COMMIT: ${APP_TAG:-latest}
       DB_HOST: db
       DB_NAME: ${DB_NAME:-jinfarm}
       DB_USER: ${DB_USER:?DB_USER is required}

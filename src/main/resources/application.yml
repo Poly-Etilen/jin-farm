@@ -20,3 +20,13 @@ management:
     health:
       probes:
         enabled: true
+      # 상태 페이지용: 구성 요소별 UP/DOWN만 공개 (상세 정보는 비공개)
+      show-components: always
+  info:
+    env:
+      enabled: true
+
+# 배포된 커밋 (CD가 APP_COMMIT 환경변수로 주입)
+info:
+  app:
+    commit: ${APP_COMMIT:local}

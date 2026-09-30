@@ -4,6 +4,9 @@ spring:
     url: jdbc:postgresql://${DB_HOST:db}:${DB_PORT:5432}/${DB_NAME:jinfarm}
     username: ${DB_USER}
     password: ${DB_PASSWORD}
+    hikari:
+      # DB 장애 시 요청·헬스체크가 기본 30초씩 멈추지 않도록 단축
+      connection-timeout: 5000
   h2:
     console:
       enabled: false

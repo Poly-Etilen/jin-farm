@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JinFarm 서버 상태</title>
+  <style>
+    :root {
+      --bg: #f6f7f4;
+      --card: #ffffff;
+      --text: #1d2420;
+      --muted: #66706a;
+      --border: #e1e5df;
+      --up: #2f8f4e;
+      --up-bg: #e5f4ea;
+      --down: #c0392b;
+      --down-bg: #fbe7e5;
+      --unknown: #8a6d1f;
+      --unknown-bg: #f7efd9;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #141816;
+        --card: #1d2320;
+        --text: #e8ece9;
+        --muted: #98a39c;
+        --border: #2d3531;
+        --up: #5cc47f;
+        --up-bg: #1e3326;
+        --down: #ef7b6e;
+        --down-bg: #3a2320;
+        --unknown: #e0bd62;
+        --unknown-bg: #362f1c;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+      line-height: 1.5;
+    }
+    main { max-width: 640px; margin: 0 auto; padding: 40px 16px; }
+    header { margin-bottom: 24px; }
+    h1 { font-size: 1.5rem; margin: 0; }
+    .sub { color: var(--muted); margin: 4px 0 0; font-size: 0.9rem; }
+
+    .overall {
+      display: flex; align-items: center; gap: 12px;
+      padding: 20px; border-radius: 12px; margin-bottom: 16px;
+      font-size: 1.15rem; font-weight: 600;
+    }
+    .dot { width: 12px; height: 12px; border-radius: 50%; background: currentColor; flex: none; }
+    .UP { color: var(--up); background: var(--up-bg); }
+    .DOWN, .OUT_OF_SERVICE, .ERROR { color: var(--down); background: var(--down-bg); }
+    .UNKNOWN { color: var(--unknown); background: var(--unknown-bg); }
+
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 4px 20px; margin-bottom: 16px;
+    }
+    .row {
+      display: flex; justify-content: space-between; align-items: center; gap: 16px;
+      padding: 12px 0; border-bottom: 1px solid var(--border);
+    }
+    .row:last-child { border-bottom: none; }
+    .label { color: var(--muted); }
+    .value { font-weight: 500; text-align: right; overflow-wrap: anywhere; }
+    .badge { font-size: 0.8rem; font-weight: 600; padding: 2px 10px; border-radius: 999px; }
+    code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; }
+
+    footer { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 0.85rem; }
+    button {
+      font: inherit; color: var(--text); background: var(--card);
+      border: 1px solid var(--border); border-radius: 8px; padding: 6px 14px; cursor: pointer;
+    }
+    button:hover { border-color: var(--muted); }
+    button:disabled { opacity: 0.5; cursor: wait; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>JinFarm 서버 상태</h1>
+    <p class="sub">서버 · DB 연결 · 배포 버전을 확인하는 페이지 (10초마다 새로고침)</p>
+  </header>
+
+  <div id="overall" class="overall UNKNOWN"><span class="dot"></span><span id="overall-text">확인 중…</span></div>
+
+  <section class="card" aria-label="구성 요소">
+    <div class="row"><span class="label">애플리케이션</span><span id="app-status" class="badge UNKNOWN">-</span></div>
+    <div class="row"><span class="label">데이터베이스</span><span id="db-status" class="badge UNKNOWN">-</span></div>
+    <div class="row"><span class="label">디스크</span><span id="disk-status" class="badge UNKNOWN">-</span></div>
+  </section>
+
+  <section class="card" aria-label="배포 정보">
+    <div class="row"><span class="label">버전</span><span id="version" class="value">-</span></div>
+    <div class="row"><span class="label">커밋</span><span id="commit" class="value">-</span></div>
+    <div class="row"><span class="label">빌드 시각</span><span id="build-time" class="value">-</span></div>
+    <div class="row"><span class="label">응답 시간</span><span id="latency" class="value">-</span></div>
+  </section>
+
+  <footer>
+    <span id="checked-at">-</span>
+    <button id="refresh" type="button">지금 확인</button>
+  </footer>
+</main>
+
+<script>
+  const LABELS = { UP: "정상", DOWN: "장애", OUT_OF_SERVICE: "중지", UNKNOWN: "알 수 없음", ERROR: "연결 실패" };
+  const $ = (id) => document.getElementById(id);
+
+  function setBadge(el, status) {
+    const s = status || "UNKNOWN";
+    el.className = "badge " + s;
+    el.textContent = LABELS[s] || s;
+  }
+
+  function formatTime(iso) {
+    return iso ? new Date(iso).toLocaleString("ko-KR") : "-";
+  }
+
+  async function fetchJson(url) {
+    const res = await fetch(url, { cache: "no-store" });
+    // health는 DOWN일 때 503과 함께 본문을 준다
+    if (!res.ok && res.status !== 503) throw new Error(res.status);
+    return res.json();
+  }
+
+  let inFlight = false;
+
+  async function check() {
+    // 서버 응답이 느릴 때 요청이 겹겹이 쌓이지 않도록 한 번에 하나만
+    if (inFlight) return;
+    inFlight = true;
+    $("refresh").disabled = true;
+    const started = performance.now();
+    try {
+      const [health, info] = await Promise.all([
+        fetchJson("actuator/health"),
+        fetchJson("actuator/info").catch(() => ({})),
+      ]);
+      const latency = Math.round(performance.now() - started);
+      const components = health.components || {};
+
+      $("overall").className = "overall " + health.status;
+      $("overall-text").textContent = health.status === "UP" ? "모든 시스템 정상" : "일부 구성 요소에 문제가 있습니다";
+      setBadge($("app-status"), health.status);
+      setBadge($("db-status"), components.db && components.db.status);
+      setBadge($("disk-status"), components.diskSpace && components.diskSpace.status);
+
+      const app = info.app || {};
+      const build = info.build || {};
+      $("version").textContent = build.version || "-";
+      $("commit").innerHTML = app.commit ? "<code></code>" : "-";
+      if (app.commit) $("commit").firstChild.textContent = app.commit.slice(0, 7);
+      $("build-time").textContent = formatTime(build.time);
+      $("latency").textContent = latency + " ms";
+    } catch (e) {
+      $("overall").className = "overall ERROR";
+      $("overall-text").textContent = "서버에 연결할 수 없습니다";
+      ["app-status", "db-status", "disk-status"].forEach((id) => setBadge($(id), "ERROR"));
+      $("latency").textContent = "-";
+    }
+    $("checked-at").textContent = "마지막 확인: " + new Date().toLocaleTimeString("ko-KR");
+    $("refresh").disabled = false;
+    inFlight = false;
+  }
+
+  $("refresh").addEventListener("click", check);
+  check();
+  setInterval(check, 10000);
+</script>
+</body>
+</html>
