@@ -12,12 +12,13 @@
 | 이미지 저장소 | **GHCR** (GitHub Container Registry) | GitHub 계정으로 바로 사용, 버전별 이미지 보관 → 롤백 가능 |
 | 배포 방식 | 서버에 **self-hosted runner** 설치 | 공유기 포트포워딩 없이 서버가 GitHub에 먼저 접속해 배포 작업을 받아옴 |
 | 도메인 | 없음 → **추후 구매** | 구매 시 Cloudflare Tunnel로 HTTPS 공개 (4장) |
-| 코드 품질 | **SonarQube Cloud (Free 플랜)** + JaCoCo 커버리지 | Private 저장소 5만 줄까지 무료, PR 분석 지원, 서버 자원 사용 없음 |
+| 코드 품질 | **SonarQube Community Build (로컬 Docker)** + JaCoCo 커버리지 | 무료, 익숙한 자체 설치형. 서버 준비 후 서버로 이전 검토 |
 
 ## 2. 전체 구성
 
 ```
  개발 PC ── git push ──▶ GitHub
+  └─ (로컬) SonarQube :9000 ── 수동 분석
                            │
             ┌──────────────┴──────────────┐
             │ GitHub Actions (클라우드)     │
@@ -42,7 +43,7 @@
 
 | 워크플로 | 트리거 | 하는 일 |
 |---|---|---|
-| [`ci.yml`](../.github/workflows/ci.yml) | main으로 가는 PR, main에 push | Java 21로 빌드 + 테스트 + JaCoCo 커버리지 + SonarQube Cloud 분석. **PR에서는 Quality Gate 실패 시 CI 실패** |
+| [`ci.yml`](../.github/workflows/ci.yml) | main으로 가는 PR | Java 21로 빌드 + 테스트 + JaCoCo 커버리지, 커버리지 보고서를 Actions 결과물로 업로드 |
 | [`cd.yml`](../.github/workflows/cd.yml) | main에 push, 수동 실행 | ① 빌드·테스트 ② 이미지를 `ghcr.io/<owner>/jinfarm:<커밋SHA>`, `:latest`로 push ③ 서버 runner가 새 이미지로 교체 ④ `/actuator/health` 확인, 실패 시 로그 출력 후 실패 처리 |
 
 - 이미지는 **amd64와 arm64를 둘 다** 만든다. 서버가 미니PC든 라즈베리파이든 같은 파이프라인을 쓴다.
@@ -50,19 +51,38 @@
 - 배포는 한 번에 하나만 실행된다 (`concurrency`).
 - `environment: production`을 쓰므로, GitHub 설정에서 **배포 전 승인**을 켤 수 있다.
 
-### SonarQube Cloud
+### SonarQube (로컬 Docker)
 
 | 항목 | 값 |
 |---|---|
-| Organization | `poly-etilen` |
-| Project key | `Poly-Etilen_jin-farm` |
-| 설정 위치 | `pom.xml`의 `sonar.*` 속성 |
-| 인증 | GitHub Secrets `SONAR_TOKEN` |
-| 분석 방식 | GitHub Actions (CI-based). SonarQube Cloud의 **Automatic Analysis는 꺼야 함** (켜져 있으면 분석이 충돌해 실패) |
+| 구성 | [`tools/sonarqube/docker-compose.yml`](../tools/sonarqube/docker-compose.yml) — SonarQube Community Build + PostgreSQL |
+| 주소 | http://localhost:9000 (이 PC에서만 접속 가능) |
+| Project key | `jinfarm` (`pom.xml`의 `sonar.*` 속성) |
+| 인증 | 환경변수 `SONAR_TOKEN` (SonarQube에서 발급한 토큰) |
+| 메모리 | SonarQube 컨테이너 최대 3GB. Docker Desktop에 4GB 이상 할당 권장 |
 
-- main 분석 결과가 "새 코드" 판단의 기준이 되므로, main push 때도 분석한다 (Quality Gate는 기다리지 않음).
-- main 보호 규칙의 필수 체크에 CI를 넣으면 Quality Gate를 통과하지 못한 PR은 병합할 수 없다.
-- 로컬에서 커버리지만 보려면 `mvnw verify` 후 `target/site/jacoco/index.html`을 연다.
+**처음 한 번**
+
+1. `docker compose -f tools/sonarqube/docker-compose.yml up -d` → 1~2분 후 http://localhost:9000 접속
+2. 초기 계정으로 로그인 후 **관리자 비밀번호 변경** (초기 계정은 SonarQube 공식 문서 참고)
+3. 우측 상단 계정 → My Account → Security → **Generate Token** (종류: Global Analysis Token)
+4. 토큰을 사용자 환경변수 `SONAR_TOKEN`으로 등록 (Windows: 시스템 속성 → 환경 변수), 터미널 재시작
+
+**분석 실행** (코드 변경 후, PR 올리기 전)
+
+```bash
+./mvnw verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
+```
+
+→ http://localhost:9000/dashboard?id=jinfarm 에서 결과 확인. 첫 분석 시 프로젝트가 자동 생성된다.
+
+**한계와 이후 계획**
+
+- Community Build는 **main 브랜치 분석만** 지원한다 (브랜치·PR 분석은 유료판).
+- GitHub Actions의 클라우드 러너는 로컬 SonarQube에 접속할 수 없으므로 **CI에서는 분석하지 않는다.**
+- 서버가 준비되면 SonarQube를 서버로 옮기고, 서버의 self-hosted runner에서 main 분석을 자동 실행하는 방안을 검토한다.
+  단, 미니PC 기준 SonarQube가 메모리 2~3GB를 차지하므로 서버 사양(RAM 16GB 권장)을 함께 고려한다.
+- 커버리지만 보려면 `mvnw verify` 후 `target/site/jacoco/index.html`을 연다.
 
 ### 관련 파일
 
@@ -155,7 +175,7 @@
 | 항목 | 비용 |
 |---|---|
 | GitHub (Private 저장소, Actions, GHCR) | 무료 한도 내 (Actions 월 2,000분, 패키지 저장 500MB) |
-| SonarQube Cloud | Free 플랜 (Private 5만 줄까지). **Team 플랜 체험 신청하지 않도록 주의** |
+| SonarQube Community Build | 무료 (로컬 Docker) |
 | 서버 전기료 | 미니PC 기준 월 1~2천원 수준 |
 | 도메인 | 추후 연 1~2만원 |
 | Cloudflare Tunnel, Tailscale | 무료 |

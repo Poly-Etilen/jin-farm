@@ -1,10 +1,9 @@
-# PR과 main push마다 빌드 + 테스트 + SonarQube Cloud 분석
+# PR마다 빌드 + 테스트 + 커버리지
+# SonarQube 분석은 로컬 SonarQube(tools/sonarqube)에서 실행한다 (docs/02-infrastructure.md 참고)
 name: CI
 
 on:
   pull_request:
-    branches: [main]
-  push:
     branches: [main]
 
 permissions:
@@ -15,22 +14,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # Sonar가 변경 이력(blame)으로 새 코드를 판별
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
-      - uses: actions/cache@v4
+      - run: chmod +x mvnw && ./mvnw -B verify
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          path: ~/.sonar/cache
-          key: ${{ runner.os }}-sonar
-      - name: Build, test & analyze
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: |
-          chmod +x mvnw
-          # PR에서는 Quality Gate 결과를 기다려 실패하면 CI도 실패 처리
-          ./mvnw -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
-            -Dsonar.qualitygate.wait=${{ github.event_name == 'pull_request' }}
+          name: coverage-report
+          path: target/site/jacoco/
